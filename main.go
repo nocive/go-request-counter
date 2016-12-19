@@ -36,6 +36,8 @@ func boot() {
 		log.Println("boot :: data file exists, loading")
 		err = storage.Load(counter)
 		handleError(err)
+
+		log.Printf("boot :: %d requests loaded from data file\n", counter.Count())
 		log.Println("boot :: firing a manual refresh")
 		counter.Refresh() // purge expired events before starting
 	}

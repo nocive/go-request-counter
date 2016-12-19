@@ -4,7 +4,6 @@ all: install run
 export GOPATH=$(PWD)
 
 install:
-	go get github.com/likexian/simplejson-go
 	$(MAKE) build
 
 build:
