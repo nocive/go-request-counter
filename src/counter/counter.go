@@ -2,43 +2,39 @@
 package counter
 
 import (
+	"net"
 	"time"
+
+	"github.com/nocive/go-request-counter/src/request"
 )
 
 type RequestCounter struct {
-	Ttl      time.Duration `json:"ttl"`
-	Requests []int64       `json:"requests"`
+	Ttl         time.Duration     `json:"ttl"`
+	Requests    []request.Request `json:"requests"`
 }
 
 func NewRequestCounter(t time.Duration) *RequestCounter {
 	return &RequestCounter{
 		Ttl:      t,
-		Requests: make([]int64, 0),
+		Requests: make([]request.Request, 0),
 	}
 }
 
-func (this *RequestCounter) Add(ts int64) {
-	this.Requests = append(this.Requests, ts)
+func (this *RequestCounter) Add(req request.Request) {
+	this.Requests = append(this.Requests, req)
 }
 
 func (this *RequestCounter) Remove(idx int) {
 	this.Requests = append(this.Requests[:idx], this.Requests[idx+1:]...)
 }
 
-func (this *RequestCounter) Mark() {
-	this.Requests = append(this.Requests, time.Now().UnixNano())
-}
-
-func (this *RequestCounter) Expired(ts int64) bool {
-	t := time.Unix(0, ts)
-	elapsed := time.Since(t)
-
-	return elapsed.Seconds() > this.Ttl.Seconds()
+func (this *RequestCounter) Mark(ip net.IP) {
+	this.Requests = append(this.Requests, *request.NewRequest(ip))
 }
 
 func (this *RequestCounter) Refresh() {
 	for i := len(this.Requests) - 1; i >= 0; i-- {
-		if this.Expired(this.Requests[i]) {
+		if this.Requests[i].Expired(this.Ttl) {
 			this.Remove(i)
 		}
 	}

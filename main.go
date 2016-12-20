@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -53,7 +54,25 @@ func boot() {
 }
 
 func start() {
-	http.HandleFunc("/", serve)
+	sema := make(chan struct{}, maxClients)
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		sema <- struct{}{}
+		defer func() { <-sema }()
+
+		log.Println("serve :: request received")
+
+		cnt.Mark(net.ParseIP(r.RemoteAddr))
+		currentCount := cnt.Count()
+
+		io.WriteString(w, fmt.Sprintf("%d\n", currentCount))
+		log.Printf("serve :: hits incremented! current: %d\n", currentCount)
+
+		time.Sleep(2 * time.Second)
+
+		log.Println("serve :: request finished")
+	})
+
 	log.Println("start :: preparing to listen on", bind)
 	http.ListenAndServe(bind, nil)
 }
@@ -65,17 +84,6 @@ func shutdown() {
 	handleError(err)
 }
 
-func serve(w http.ResponseWriter, r *http.Request) {
-	log.Println("serve :: request received")
-
-	cnt.Mark()
-	currentCount := cnt.Count()
-
-	io.WriteString(w, fmt.Sprintf("%d\n", currentCount))
-	log.Printf("serve :: hits incremented! current: %d\n", currentCount)
-
-	log.Println("serve :: request finished")
-}
 
 func trap() {
 	c := make(chan os.Signal, 2)
@@ -91,22 +99,22 @@ func trap() {
 func ticker() {
 	quit := make(chan struct{})
 
-	refreshTicker := time.NewTicker(time.Duration(refreshInterval) * time.Second)
-	saveTicker := time.NewTicker(time.Duration(saveInterval) * time.Second)
+	refreshTicker := time.NewTicker(time.Duration(refreshInterval) * time.Millisecond)
+	saveTicker := time.NewTicker(time.Duration(saveInterval) * time.Millisecond)
+
 	go func() {
 		for {
 			select {
 			case <- refreshTicker.C:
 				log.Printf("ticker :: refresh: %d\n", cnt.Count())
 				cnt.Refresh()
-			case <- quit:
-				refreshTicker.Stop()
-				return
 
 			case <- saveTicker.C:
 				log.Println("ticker :: snapshoting data to file")
 				stg.Save(cnt)
+
 			case <- quit:
+				refreshTicker.Stop()
 				saveTicker.Stop()
 				return
 			}
@@ -133,7 +141,7 @@ func main() {
 		path = fmt.Sprintf("%s/%s", wd, path)
 	}
 
-	cnt = counter.NewRequestCounter(time.Duration(ttl) * time.Second)
+	cnt = counter.NewRequestCounter(time.Duration(ttl) * time.Millisecond)
 	stg = storage.NewRequestCounterStorage(path)
 
 	boot()
@@ -141,14 +149,27 @@ func main() {
 }
 
 const (
+	// default path + filename where to store the data in
 	defaultDataPath   = "data/counter.json"
+
+	// default bind address to listen to
 	defaultBindAddr   = "0.0.0.0:6666"
-	defaultRequestTtl = 60
-	refreshInterval   = 1
-	saveInterval      = 90
+
+	// default request time to live
+	defaultRequestTtl = 60000
+
+	// max concurrent clients allowed
+	maxClients        = 5
+
+	// how often should the counter data be refreshed
+	refreshInterval   = 1000
+
+	// how often should the counter data be saved to disk
+	saveInterval      = 90000
 )
 
 var (
+	// cli arguments
 	bind  string
 	ttl   int
 	path  string

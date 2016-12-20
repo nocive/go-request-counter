@@ -9,3 +9,7 @@ build:
 
 run:
 	go run main.go
+
+clean:
+	rm -f counter
+	rm -f data/counter.json
