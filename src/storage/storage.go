@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 
 	"github.com/nocive/go-request-counter/src/counter"
 )
@@ -16,7 +17,7 @@ type RequestCounterStorage struct {
 
 func NewRequestCounterStorage(p string) *RequestCounterStorage {
 	return &RequestCounterStorage{
-		path: p,
+		path: filepath.Clean(p),
 	}
 }
 

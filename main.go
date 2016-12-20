@@ -5,14 +5,14 @@ import (
 	"io"
 	"fmt"
 	"flag"
-	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/op/go-logging"
 
 	"github.com/nocive/go-request-counter/src/counter"
 	"github.com/nocive/go-request-counter/src/storage"
@@ -21,7 +21,7 @@ import (
 func handleError(err error) {
 	if err != nil {
 		_, file, line, _ := runtime.Caller(1)
-		log.Fatal(fmt.Sprintf("Line: %d\tFile: %s\nMessage: %s", line, file, err))
+		logger.Fatal(fmt.Sprintf("Line: %d\tFile: %s\nMessage: %s", line, file, err))
 		os.Exit(1)
 	}
 }
@@ -29,68 +29,72 @@ func handleError(err error) {
 func boot() {
 	var err error
 
-	log.Printf("boot :: booting! ttl: %d / refresh interval: %d / save interval: %d\n", ttl, refreshInterval, saveInterval)
+	logger.Info(fmt.Sprintf("booting! ttl: %dms / refresh interval: %dms / save interval: %dms\n", requestTtl, RefreshInterval, SaveInterval))
 
-	if !stg.Exists() {
-		log.Println("boot :: data file doesn't exist, creating")
-		err = stg.Create()
+	if !reqCounterStorage.Exists() {
+		logger.Info("data file doesn't exist, creating\n")
+		err = reqCounterStorage.Create()
 		handleError(err)
-		log.Println("boot :: starting with empty counter")
 	} else {
-		log.Println("boot :: data file exists, loading")
-		err = stg.Load(cnt)
+		logger.Info("data file exists, loading\n")
+		err = reqCounterStorage.Load(reqCounter)
 		handleError(err)
+		logger.Info(fmt.Sprintf("%d requests loaded from data file\n", reqCounter.GetCount()))
 
-		log.Printf("boot :: %d requests loaded from data file\n", cnt.Count())
-		log.Println("boot :: firing a manual refresh")
-		cnt.Refresh() // purge expired events before starting
+		logger.Info("firing a manual refresh\n")
+		reqCounter.Refresh() // purge expired events before starting
 	}
 
-	log.Println("boot :: initializing signal traps")
+	logger.Info("initializing signal traps\n")
 	trap()
 
-	log.Println("boot :: initializing ticker")
+	logger.Info("initializing tickers\n")
 	ticker()
 }
 
 func start() {
-	sema := make(chan struct{}, maxClients)
+	sema := make(chan struct{}, MaxClients)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		sema <- struct{}{}
 		defer func() { <-sema }()
-
-		log.Println("serve :: request received")
-
-		cnt.Mark(net.ParseIP(r.RemoteAddr))
-		currentCount := cnt.Count()
-
-		io.WriteString(w, fmt.Sprintf("%d\n", currentCount))
-		log.Printf("serve :: hits incremented! current: %d\n", currentCount)
-
-		time.Sleep(2 * time.Second)
-
-		log.Println("serve :: request finished")
+		process(w, r)
 	})
 
-	log.Println("start :: preparing to listen on", bind)
-	http.ListenAndServe(bind, nil)
+	logger.Info(fmt.Sprintf("preparing to listen on %s\n", bindAddr))
+	http.ListenAndServe(bindAddr, nil)
+}
+
+func process(w http.ResponseWriter, r *http.Request) {
+	remoteAddr := r.Header.Get("X-Client-IP")
+	if remoteAddr == "" {
+		remoteAddr = r.RemoteAddr
+	}
+	logger.Info(fmt.Sprintf("request received / ip: %s\n", remoteAddr))
+
+	reqCounter.Mark(remoteAddr)
+	currentCount := reqCounter.GetCount()
+
+	io.WriteString(w, fmt.Sprintf("%d\n", currentCount))
+	logger.Info(fmt.Sprintf("hits incremented / current: %d\n", currentCount))
+
+	time.Sleep(SleepPerRequest * time.Millisecond)
+	logger.Info("request finished\n")
 }
 
 func shutdown() {
-	log.Println("shutdown :: saving data to file")
+	logger.Info("saving data to file\n")
 
-	err := stg.Save(cnt)
+	err := reqCounterStorage.Save(reqCounter)
 	handleError(err)
 }
-
 
 func trap() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		log.Println("trap :: caught signal, cleaning up...")
+		logger.Info("caught signal, cleaning up...\n")
 		shutdown()
 		os.Exit(0)
 	}()
@@ -99,19 +103,19 @@ func trap() {
 func ticker() {
 	quit := make(chan struct{})
 
-	refreshTicker := time.NewTicker(time.Duration(refreshInterval) * time.Millisecond)
-	saveTicker := time.NewTicker(time.Duration(saveInterval) * time.Millisecond)
+	refreshTicker := time.NewTicker(time.Duration(RefreshInterval) * time.Millisecond)
+	saveTicker := time.NewTicker(time.Duration(SaveInterval) * time.Millisecond)
 
 	go func() {
 		for {
 			select {
 			case <- refreshTicker.C:
-				log.Printf("ticker :: refresh: %d\n", cnt.Count())
-				cnt.Refresh()
+				logger.Info(fmt.Sprintf("refresh / count: %d\n", reqCounter.GetCount()))
+				reqCounter.Refresh()
 
 			case <- saveTicker.C:
-				log.Println("ticker :: snapshoting data to file")
-				stg.Save(cnt)
+				logger.Info("snapshotting data to file\n")
+				reqCounterStorage.Save(reqCounter)
 
 			case <- quit:
 				refreshTicker.Stop()
@@ -122,59 +126,69 @@ func ticker() {
 	}()
 }
 
+
+
+
+const (
+	// default path + filename where to store the data in
+	DefaultDataPath   = "./data/counter.json"
+
+	// default bind address to listen to
+	DefaultBindAddr   = "0.0.0.0:6666"
+
+	// default request time to live (ms)
+	DefaultRequestTtl = 60000
+
+	// max concurrent clients allowed
+	MaxClients        = 5
+
+	// how often should the counter data be refreshed (ms)
+	RefreshInterval   = 1000
+
+	// how often should the counter data be saved to disk (ms)
+	SaveInterval      = 90000
+
+	// for how long should each request sleep (ms)
+	SleepPerRequest   = 2000
+
+	// prefix used for the log messages
+	LoggerPrefix      = "go-request-counter"
+)
+
+var logger = logging.MustGetLogger(LoggerPrefix)
+
+var format = logging.MustStringFormatter(
+	`%{color}• %{shortfunc} %{level:.4s} %{id:03x}%{color:reset} ‣ %{message}`,
+)
+
+var (
+	bindAddr    string
+	requestTtl  int
+	dataPath    string
+	displayHelp bool
+
+	reqCounter        *counter.RequestCounter
+	reqCounterStorage *storage.RequestCounterStorage
+)
+
 func main() {
-	flag.StringVar(&bind, "bind", defaultBindAddr, "which address to bind to in the form of addr:port.")
-	flag.IntVar(&ttl, "ttl", defaultRequestTtl, "request ttl in seconds. when requests expire they are no longer counted.")
-	flag.StringVar(&path, "path", defaultDataPath, "path to the storage filename.")
-	flag.BoolVar(&help, "help", false, "display this help text.")
+	logging.SetFormatter(format)
+
+	flag.StringVar(&bindAddr, "bind", DefaultBindAddr, "which address to bind to in the form of addr:port.")
+	flag.IntVar(&requestTtl, "ttl", DefaultRequestTtl, "request ttl in seconds. when requests expire they are no longer counted.")
+	flag.StringVar(&dataPath, "path", DefaultDataPath, "path to the storage filename.")
+	flag.BoolVar(&displayHelp, "help", false, "display this help text.")
 	flag.Parse()
 
-	if help {
+	if displayHelp {
 		fmt.Printf("Usage: %s [-bind address] [-ttl ttl] [-path path]\n\n", os.Args[0])
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
 
-	if string(path[0]) != "/" {
-		wd, err := os.Getwd()
-		handleError(err)
-		path = fmt.Sprintf("%s/%s", wd, path)
-	}
-
-	cnt = counter.NewRequestCounter(time.Duration(ttl) * time.Millisecond)
-	stg = storage.NewRequestCounterStorage(path)
+	reqCounter = counter.NewRequestCounter(time.Duration(requestTtl) * time.Millisecond)
+	reqCounterStorage = storage.NewRequestCounterStorage(dataPath)
 
 	boot()
 	start()
 }
-
-const (
-	// default path + filename where to store the data in
-	defaultDataPath   = "data/counter.json"
-
-	// default bind address to listen to
-	defaultBindAddr   = "0.0.0.0:6666"
-
-	// default request time to live
-	defaultRequestTtl = 60000
-
-	// max concurrent clients allowed
-	maxClients        = 5
-
-	// how often should the counter data be refreshed
-	refreshInterval   = 1000
-
-	// how often should the counter data be saved to disk
-	saveInterval      = 90000
-)
-
-var (
-	// cli arguments
-	bind  string
-	ttl   int
-	path  string
-	help  bool
-
-	cnt   *counter.RequestCounter
-	stg   *storage.RequestCounterStorage
-)
