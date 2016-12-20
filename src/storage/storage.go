@@ -1,11 +1,13 @@
 // vi:set tabstop=8 shiftwidth=8 noexpandtab:
-package main
+package storage
 
 import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+
+	"github.com/nocive/go-request-counter/src/counter"
 )
 
 type RequestCounterStorage struct {
@@ -29,7 +31,7 @@ func (this *RequestCounterStorage) Create() error {
 	return err
 }
 
-func (this *RequestCounterStorage) Save(c *RequestCounter) error {
+func (this *RequestCounterStorage) Save(c *counter.RequestCounter) error {
 	file, err := os.Create(this.path)
 	defer file.Close()
 	if err != nil {
@@ -42,7 +44,7 @@ func (this *RequestCounterStorage) Save(c *RequestCounter) error {
 	return err
 }
 
-func (this *RequestCounterStorage) Load(c *RequestCounter) error {
+func (this *RequestCounterStorage) Load(c *counter.RequestCounter) error {
 	data, err := ioutil.ReadFile(this.path)
 	if err == nil {
 		err = json.Unmarshal(data, &c)

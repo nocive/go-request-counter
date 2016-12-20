@@ -1,13 +1,13 @@
 // vi:set tabstop=8 shiftwidth=8 noexpandtab:
-package main
+package counter
 
 import (
 	"time"
 )
 
 type RequestCounter struct {
-	Ttl      time.Duration
-	Requests []int64
+	Ttl      time.Duration `json:"ttl"`
+	Requests []int64       `json:"requests"`
 }
 
 func NewRequestCounter(t time.Duration) *RequestCounter {

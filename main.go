@@ -12,6 +12,9 @@ import (
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/nocive/go-request-counter/src/counter"
+	"github.com/nocive/go-request-counter/src/storage"
 )
 
 func handleError(err error) {
@@ -25,21 +28,21 @@ func handleError(err error) {
 func boot() {
 	var err error
 
-	log.Printf("boot :: booting! ttl: %d / refresh interval: %d / save interval: %d\n", ttl, rInterval, sInterval)
+	log.Printf("boot :: booting! ttl: %d / refresh interval: %d / save interval: %d\n", ttl, refreshInterval, saveInterval)
 
-	if !storage.Exists() {
+	if !stg.Exists() {
 		log.Println("boot :: data file doesn't exist, creating")
-		err = storage.Create()
+		err = stg.Create()
 		handleError(err)
 		log.Println("boot :: starting with empty counter")
 	} else {
 		log.Println("boot :: data file exists, loading")
-		err = storage.Load(counter)
+		err = stg.Load(cnt)
 		handleError(err)
 
-		log.Printf("boot :: %d requests loaded from data file\n", counter.Count())
+		log.Printf("boot :: %d requests loaded from data file\n", cnt.Count())
 		log.Println("boot :: firing a manual refresh")
-		counter.Refresh() // purge expired events before starting
+		cnt.Refresh() // purge expired events before starting
 	}
 
 	log.Println("boot :: initializing signal traps")
@@ -58,15 +61,15 @@ func start() {
 func shutdown() {
 	log.Println("shutdown :: saving data to file")
 
-	err := storage.Save(counter)
+	err := stg.Save(cnt)
 	handleError(err)
 }
 
 func serve(w http.ResponseWriter, r *http.Request) {
 	log.Println("serve :: request received")
 
-	counter.Mark()
-	currentCount := counter.Count()
+	cnt.Mark()
+	currentCount := cnt.Count()
 
 	io.WriteString(w, fmt.Sprintf("%d\n", currentCount))
 	log.Printf("serve :: hits incremented! current: %d\n", currentCount)
@@ -88,57 +91,33 @@ func trap() {
 func ticker() {
 	quit := make(chan struct{})
 
-	rticker := time.NewTicker(time.Duration(rInterval) * time.Second)
+	refreshTicker := time.NewTicker(time.Duration(refreshInterval) * time.Second)
+	saveTicker := time.NewTicker(time.Duration(saveInterval) * time.Second)
 	go func() {
 		for {
 			select {
-			case <- rticker.C:
-				log.Printf("ticker :: refresh: %d\n", counter.Count())
-				counter.Refresh()
+			case <- refreshTicker.C:
+				log.Printf("ticker :: refresh: %d\n", cnt.Count())
+				cnt.Refresh()
 			case <- quit:
-				rticker.Stop()
+				refreshTicker.Stop()
 				return
-			}
-		}
-	}()
 
-	sticker := time.NewTicker(time.Duration(sInterval) * time.Second)
-	go func() {
-		for {
-			select {
-			case <- sticker.C:
+			case <- saveTicker.C:
 				log.Println("ticker :: snapshoting data to file")
-				storage.Save(counter)
+				stg.Save(cnt)
 			case <- quit:
-				sticker.Stop()
+				saveTicker.Stop()
 				return
 			}
 		}
 	}()
 }
 
-
-const DATA_PATH        = "data/counter.json"
-const BIND_ADDR        = "0.0.0.0:6666"
-const REQUEST_TTL      = 60
-const REFRESH_INTERVAL = 1
-const SAVE_INTERVAL    = 90
-
-var counter *RequestCounter
-var storage *RequestCounterStorage
-
-var bind      string
-var ttl       int
-var path      string
-var help      bool
-
-var rInterval int = REFRESH_INTERVAL
-var sInterval int = SAVE_INTERVAL
-
 func main() {
-	flag.StringVar(&bind, "bind", BIND_ADDR, "which address to bind to in the form of addr:port.")
-	flag.IntVar(&ttl, "ttl", REQUEST_TTL, "request ttl in seconds. when requests expire they are no longer counted.")
-	flag.StringVar(&path, "path", DATA_PATH, "path to the storage filename.")
+	flag.StringVar(&bind, "bind", defaultBindAddr, "which address to bind to in the form of addr:port.")
+	flag.IntVar(&ttl, "ttl", defaultRequestTtl, "request ttl in seconds. when requests expire they are no longer counted.")
+	flag.StringVar(&path, "path", defaultDataPath, "path to the storage filename.")
 	flag.BoolVar(&help, "help", false, "display this help text.")
 	flag.Parse()
 
@@ -148,9 +127,33 @@ func main() {
 		os.Exit(0)
 	}
 
-	counter = NewRequestCounter(time.Duration(ttl) * time.Second)
-	storage = NewRequestCounterStorage(path)
+	if string(path[0]) != "/" {
+		wd, err := os.Getwd()
+		handleError(err)
+		path = fmt.Sprintf("%s/%s", wd, path)
+	}
+
+	cnt = counter.NewRequestCounter(time.Duration(ttl) * time.Second)
+	stg = storage.NewRequestCounterStorage(path)
 
 	boot()
 	start()
 }
+
+const (
+	defaultDataPath   = "data/counter.json"
+	defaultBindAddr   = "0.0.0.0:6666"
+	defaultRequestTtl = 60
+	refreshInterval   = 1
+	saveInterval      = 90
+)
+
+var (
+	bind  string
+	ttl   int
+	path  string
+	help  bool
+
+	cnt   *counter.RequestCounter
+	stg   *storage.RequestCounterStorage
+)
