@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nocive/go-request-counter/src/counter"
+	"github.com/nocive/go-request-counter/src/request"
 )
 
 type RequestCounterStorage struct {
@@ -21,35 +21,35 @@ func NewRequestCounterStorage(p string) *RequestCounterStorage {
 	}
 }
 
-func (this *RequestCounterStorage) Exists() bool {
-	_, err := os.Stat(this.path)
+func (s *RequestCounterStorage) Exists() bool {
+	_, err := os.Stat(s.path)
 	return !os.IsNotExist(err)
 }
 
-func (this *RequestCounterStorage) Create() error {
-	file, err := os.Create(this.path)
+func (s *RequestCounterStorage) Create() error {
+	file, err := os.Create(s.path)
 	file.Close()
 	return err
 }
 
-func (this *RequestCounterStorage) Save(c *counter.RequestCounter) error {
-	file, err := os.Create(this.path)
+func (s *RequestCounterStorage) Save(b *request.RequestBucket) error {
+	file, err := os.Create(s.path)
 	defer file.Close()
 	if err != nil {
 		return err
 	}
 
-	json, err := json.Marshal(c);
+	json, err := json.Marshal(b);
 	if err == nil {
 		file.WriteString(fmt.Sprintf("%s\n", json))
 	}
 	return err
 }
 
-func (this *RequestCounterStorage) Load(c *counter.RequestCounter) error {
-	data, err := ioutil.ReadFile(this.path)
+func (s *RequestCounterStorage) Load(b *request.RequestBucket) error {
+	data, err := ioutil.ReadFile(s.path)
 	if err == nil {
-		err = json.Unmarshal(data, &c)
+		err = json.Unmarshal(data, &b)
 	}
 	return err
 }

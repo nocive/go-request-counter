@@ -6,17 +6,17 @@ import (
 )
 
 type Request struct {
-	ClientIP  string    `json:"clientip"`
+	ClientIP  string    `json:"-"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func NewRequest(ip string) *Request {
+func NewRequest(ip string, ts time.Time) *Request {
 	return &Request{
 		ClientIP:  ip,
-		Timestamp: time.Now(),
+		Timestamp: ts,
 	}
 }
 
-func (this *Request) IsExpired(ttl time.Duration) bool {
-	return time.Since(this.Timestamp).Nanoseconds() > ttl.Nanoseconds()
+func (r *Request) IsExpired(ttl time.Duration) bool {
+       return time.Since(r.Timestamp).Nanoseconds() > ttl.Nanoseconds()
 }
