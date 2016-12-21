@@ -39,7 +39,8 @@ func (this *RequestCounterStorage) Save(c *counter.RequestCounter) error {
 		return err
 	}
 
-	if json, err := json.Marshal(c); err == nil {
+	json, err := json.Marshal(c);
+	if err == nil {
 		file.WriteString(fmt.Sprintf("%s\n", json))
 	}
 	return err
